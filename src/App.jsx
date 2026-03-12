@@ -106,7 +106,7 @@ function detectIOCType(value) {
   return "unknown";
 }
 
-// ─── Mock enrichment (used when no API key provided) ─────────────────────────
+// ─── Mock enrichment ─────────────────────────────────────────────────────────
 function mockEnrich(ioc, type) {
   const scores = { ip: 72, url: 88, domain: 45, hash: 95 };
   const verdicts = { ip: "Suspicious", url: "Malicious", domain: "Suspicious", hash: "Malicious" };
@@ -126,50 +126,45 @@ function mockEnrich(ioc, type) {
   };
 }
 
-// ─── Live API enrichment ──────────────────────────────────────────────────────
+// ─── Live API enrichment via Vercel serverless proxy ─────────────────────────
 async function enrichIOC(ioc, type, keys) {
-  const result = { ioc, type, verdict: "Unknown", riskScore: 0, mitre: MITRE_MAP[type] || [], tags: [], errors: [] };
+  const result = {
+    ioc, type,
+    verdict: "Unknown",
+    riskScore: 0,
+    mitre: MITRE_MAP[type] || [],
+    tags: [],
+    errors: [],
+  };
 
-  // VirusTotal
+  // VirusTotal via /api/virustotal
   if (keys.virustotal) {
     try {
-      let endpoint = "";
-      if (type === "ip") endpoint = `https://www.virustotal.com/api/v3/ip_addresses/${ioc}`;
-      else if (type === "domain") endpoint = `https://www.virustotal.com/api/v3/domains/${ioc}`;
-      else if (type === "url") {
-        const id = btoa(ioc).replace(/=/g, "");
-        endpoint = `https://www.virustotal.com/api/v3/urls/${id}`;
-      } else if (type === "hash") endpoint = `https://www.virustotal.com/api/v3/files/${ioc}`;
-
-      if (endpoint) {
-        const res = await fetch(endpoint, { headers: { "x-apikey": keys.virustotal } });
-        const data = await res.json();
-        const stats = data?.data?.attributes?.last_analysis_stats;
-        if (stats) {
-          const malicious = stats.malicious || 0;
-          const total = Object.values(stats).reduce((a, b) => a + b, 0);
-          result.vtDetections = `${malicious}/${total}`;
-          result.riskScore = Math.round((malicious / total) * 100);
-          result.verdict = malicious > 5 ? "Malicious" : malicious > 0 ? "Suspicious" : "Clean";
-          result.country = data?.data?.attributes?.country || null;
-          result.lastSeen = data?.data?.attributes?.last_modification_date
-            ? new Date(data.data.attributes.last_modification_date * 1000).toISOString().split("T")[0]
-            : null;
-          const cats = data?.data?.attributes?.categories;
-          if (cats) result.tags = Object.values(cats).slice(0, 3);
-        }
+      const res = await fetch(`/api/virustotal?ioc=${encodeURIComponent(ioc)}&type=${type}`);
+      const data = await res.json();
+      const stats = data?.data?.attributes?.last_analysis_stats;
+      if (stats) {
+        const malicious = stats.malicious || 0;
+        const total = Object.values(stats).reduce((a, b) => a + b, 0);
+        result.vtDetections = `${malicious}/${total}`;
+        result.riskScore = Math.round((malicious / total) * 100);
+        result.verdict = malicious > 5 ? "Malicious" : malicious > 0 ? "Suspicious" : "Clean";
+        result.country = data?.data?.attributes?.country || null;
+        result.lastSeen = data?.data?.attributes?.last_modification_date
+          ? new Date(data.data.attributes.last_modification_date * 1000).toISOString().split("T")[0]
+          : null;
+        const cats = data?.data?.attributes?.categories;
+        if (cats) result.tags = Object.values(cats).slice(0, 3);
       }
     } catch (e) {
       result.errors.push("VirusTotal: " + e.message);
     }
   }
 
-  // AbuseIPDB (IP only)
+  // AbuseIPDB via /api/abuseipdb (IP only)
   if (keys.abuseipdb && type === "ip") {
     try {
-      const res = await fetch(`https://api.abuseipdb.com/api/v2/check?ipAddress=${ioc}&maxAgeInDays=90`, {
-        headers: { Key: keys.abuseipdb, Accept: "application/json" },
-      });
+      const res = await fetch(`/api/abuseipdb?ip=${encodeURIComponent(ioc)}`);
       const data = await res.json();
       if (data?.data) {
         result.abuseConfidence = data.data.abuseConfidenceScore;
@@ -185,16 +180,12 @@ async function enrichIOC(ioc, type, keys) {
     }
   }
 
-  // URLScan (URL/domain)
+  // URLScan via /api/urlscan (URL/domain)
   if (keys.urlscan && (type === "url" || type === "domain")) {
     try {
-      const scanRes = await fetch("https://urlscan.io/api/v1/scan/", {
-        method: "POST",
-        headers: { "API-Key": keys.urlscan, "Content-Type": "application/json" },
-        body: JSON.stringify({ url: ioc, visibility: "public" }),
-      });
-      const scanData = await scanRes.json();
-      if (scanData?.uuid) result.urlscanId = scanData.uuid;
+      const res = await fetch(`/api/urlscan?url=${encodeURIComponent(ioc)}`);
+      const data = await res.json();
+      if (data?.uuid) result.urlscanId = data.uuid;
     } catch (e) {
       result.errors.push("URLScan: " + e.message);
     }
@@ -212,9 +203,7 @@ async function enrichIOC(ioc, type, keys) {
 function exportCSV(results) {
   const headers = ["IOC", "Type", "Verdict", "Risk Score", "VT Detections", "Abuse Confidence", "Country", "Tags", "MITRE Techniques", "MITRE Tactics", "Mitigations", "Last Seen", "Notes"];
   const rows = results.map((r) => [
-    r.ioc,
-    r.type,
-    r.verdict,
+    r.ioc, r.type, r.verdict,
     r.riskScore + "%",
     r.vtDetections || "N/A",
     r.abuseConfidence != null ? r.abuseConfidence + "%" : "N/A",
@@ -226,7 +215,6 @@ function exportCSV(results) {
     r.lastSeen || "N/A",
     r.isMock ? "MOCK DATA" : r.errors?.join(", ") || "",
   ]);
-
   const csv = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -286,12 +274,10 @@ export default function IOCEnrichmentTool() {
   const handleAnalyze = useCallback(async () => {
     const lines = rawInput.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!lines.length) return;
-
     setLoading(true);
     setResults([]);
     setProgress(0);
     setActiveTab("results");
-
     const enriched = [];
     for (let i = 0; i < lines.length; i++) {
       const ioc = lines[i];
@@ -301,15 +287,13 @@ export default function IOCEnrichmentTool() {
       setResults([...enriched]);
       setProgress(Math.round(((i + 1) / lines.length) * 100));
     }
-
     setLoading(false);
   }, [rawInput, keys, hasKeys]);
 
-  const sampleIOCs = `8.8.8.8\n185.220.101.45\nhttps://malware-download.xyz/payload.exe\nevil-phishing-site.ru\nd41d8cd98f00b204e9800998ecf8427e`;
+  const sampleIOCs = `185.220.101.45\n194.165.16.11\nhttps://malware-download.xyz/payload.exe\nevil-phishing-site.ru\n44d88612fea8a8f36de82e1278abb02f`;
 
   return (
     <div style={{ minHeight: "100vh", background: "#080c14", color: "#c8d8f0", fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
-      {/* Scanline overlay */}
       <div style={{ position: "fixed", inset: 0, backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)", pointerEvents: "none", zIndex: 0 }} />
 
       <div style={{ position: "relative", zIndex: 1, maxWidth: 1100, margin: "0 auto", padding: "24px 20px" }}>
@@ -355,7 +339,7 @@ export default function IOCEnrichmentTool() {
                 {keys[k] && <span style={{ color: "#00ff88", fontSize: 12 }}>✓</span>}
               </div>
             ))}
-            <div style={{ fontSize: 10, color: "#2a4a6a", marginTop: 8 }}>Keys are stored in memory only and never sent anywhere except the respective APIs.</div>
+            <div style={{ fontSize: 10, color: "#2a4a6a", marginTop: 8 }}>Keys are loaded from Vercel environment variables automatically.</div>
           </div>
         )}
 
@@ -364,7 +348,7 @@ export default function IOCEnrichmentTool() {
           <div>
             {!hasKeys && (
               <div style={{ background: "#1a1000", border: "1px solid #ff9a0033", borderRadius: 6, padding: 12, marginBottom: 16, fontSize: 11, color: "#ff9a00" }}>
-                ⚠ No API keys configured — running in DEMO MODE with mock data. Add keys above for live enrichment.
+                ⚠ No API keys configured — running in DEMO MODE with mock data.
               </div>
             )}
             <div style={{ marginBottom: 12 }}>
@@ -409,7 +393,6 @@ export default function IOCEnrichmentTool() {
 
             {results.length > 0 && (
               <>
-                {/* Summary row */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 20 }}>
                   {[
                     { label: "TOTAL IOCs", value: results.length, color: "#7eb8e8" },
@@ -424,7 +407,6 @@ export default function IOCEnrichmentTool() {
                   ))}
                 </div>
 
-                {/* Export button */}
                 <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                   <button onClick={() => exportCSV(results)}
                     style={{ background: "#0a1520", border: "1px solid #1e3a5a", color: "#7eb8e8", padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11, letterSpacing: 2, fontFamily: "monospace" }}>
@@ -432,15 +414,14 @@ export default function IOCEnrichmentTool() {
                   </button>
                 </div>
 
-                {/* Results table */}
                 <div style={{ border: "1px solid #1e3a5a", borderRadius: 6, overflow: "hidden" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 80px 100px 140px 100px 80px", gap: 0, background: "#0a1520", padding: "10px 16px", fontSize: 10, color: "#4a6a8a", letterSpacing: 2, borderBottom: "1px solid #1e3a5a" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 80px 100px 140px 100px 80px", background: "#0a1520", padding: "10px 16px", fontSize: 10, color: "#4a6a8a", letterSpacing: 2, borderBottom: "1px solid #1e3a5a" }}>
                     <span>IOC</span><span>TYPE</span><span>VERDICT</span><span>RISK SCORE</span><span>VT HITS</span><span>COUNTRY</span>
                   </div>
                   {results.map((r, i) => (
                     <div key={i}>
                       <div onClick={() => setExpandedRow(expandedRow === i ? null : i)}
-                        style={{ display: "grid", gridTemplateColumns: "2fr 80px 100px 140px 100px 80px", gap: 0, padding: "12px 16px", borderBottom: "1px solid #0d1e2e", cursor: "pointer", background: expandedRow === i ? "#0d1e2e" : "transparent", transition: "background 0.15s" }}>
+                        style={{ display: "grid", gridTemplateColumns: "2fr 80px 100px 140px 100px 80px", padding: "12px 16px", borderBottom: "1px solid #0d1e2e", cursor: "pointer", background: expandedRow === i ? "#0d1e2e" : "transparent", transition: "background 0.15s" }}>
                         <span style={{ fontSize: 12, color: "#9eb8d8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ioc}</span>
                         <span style={{ fontSize: 10, color: "#4a8aaa", letterSpacing: 1, alignSelf: "center" }}>{r.type.toUpperCase()}</span>
                         <span style={{ alignSelf: "center" }}><VerdictBadge verdict={r.verdict} /></span>
@@ -449,7 +430,6 @@ export default function IOCEnrichmentTool() {
                         <span style={{ fontSize: 12, color: "#7eb8e8", alignSelf: "center" }}>{r.country || "—"}</span>
                       </div>
 
-                      {/* Expanded MITRE detail */}
                       {expandedRow === i && (
                         <div style={{ background: "#060e18", borderBottom: "1px solid #0d1e2e", padding: "16px 20px" }}>
                           {r.isMock && <div style={{ fontSize: 10, color: "#ff9a00", marginBottom: 12, padding: "6px 10px", background: "#1a100022", border: "1px solid #ff9a0033", borderRadius: 3 }}>⚠ DEMO DATA — Configure API keys for live enrichment</div>}
@@ -483,6 +463,12 @@ export default function IOCEnrichmentTool() {
                               <span style={{ color: r.abuseConfidence > 50 ? "#ff6b6b" : "#ffb347" }}>{r.abuseConfidence}%</span>
                             </div>
                           )}
+
+                          {r.errors?.length > 0 && (
+                            <div style={{ marginTop: 8, fontSize: 10, color: "#ff6b6b" }}>
+                              ⚠ Errors: {r.errors.join(", ")}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -500,7 +486,6 @@ export default function IOCEnrichmentTool() {
           </div>
         )}
 
-        {/* Footer */}
         <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid #0d1e2e", display: "flex", justifyContent: "space-between", fontSize: 10, color: "#2a4a6a", letterSpacing: 1 }}>
           <span>IOC ENRICHMENT TOOL · SOC ANALYST PORTFOLIO PROJECT</span>
           <span>MITRE ATT&CK® FRAMEWORK v14</span>
