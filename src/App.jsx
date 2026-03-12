@@ -1,3 +1,4 @@
+/* eslint no-unused-vars: ["error", { "varsIgnorePattern": "^mockEnrich$" }] */
 import { useState, useCallback } from "react";
 
 // ─── MITRE ATT&CK Mapping Database ───────────────────────────────────────────
