@@ -269,7 +269,11 @@ function RiskMeter({ score }) {
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function IOCEnrichmentTool() {
   const [rawInput, setRawInput] = useState("");
-  const [keys, setKeys] = useState({ virustotal: "", abuseipdb: "", urlscan: "" });
+  const [keys, setKeys] = useState({
+    virustotal: process.env.REACT_APP_VIRUSTOTAL_KEY || "",
+    abuseipdb: process.env.REACT_APP_ABUSEIPDB_KEY || "",
+    urlscan: process.env.REACT_APP_URLSCAN_KEY || "",
+  });
   const [showKeys, setShowKeys] = useState(false);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
