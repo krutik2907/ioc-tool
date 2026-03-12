@@ -106,25 +106,6 @@ function detectIOCType(value) {
   return "unknown";
 }
 
-// ─── Mock enrichment ─────────────────────────────────────────────────────────
-function mockEnrich(ioc, type) {
-  const scores = { ip: 72, url: 88, domain: 45, hash: 95 };
-  const verdicts = { ip: "Suspicious", url: "Malicious", domain: "Suspicious", hash: "Malicious" };
-  return {
-    ioc,
-    type,
-    verdict: verdicts[type] || "Unknown",
-    riskScore: scores[type] || 50,
-    abuseConfidence: type === "ip" ? 76 : null,
-    country: type === "ip" ? "RU" : null,
-    vtDetections: type !== "ip" ? "34/72" : "28/72",
-    lastSeen: "2025-03-10",
-    tags: type === "hash" ? ["trojan", "ransomware"] : type === "url" ? ["phishing", "malware-distribution"] : ["c2", "botnet"],
-    mitre: MITRE_MAP[type] || [],
-    source: "MOCK DATA – Add API keys for live results",
-    isMock: true,
-  };
-}
 
 // ─── Live API enrichment via Vercel serverless proxy ─────────────────────────
 // Keys are stored server-side only in Vercel env vars — never exposed to browser
