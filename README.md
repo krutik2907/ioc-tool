@@ -1,70 +1,111 @@
-# Getting Started with Create React App
+# 🛡️ IOC Bulk Enrichment Tool
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A threat intelligence platform built for SOC analysts to enrich Indicators of Compromise (IOCs) in bulk, map findings to the MITRE ATT&CK framework, and export incident reports.
 
-## Available Scripts
+**Live Demo:** [ioc-tool-krutik2907.vercel.app](https://ioc-tool-krutik2907.vercel.app)
 
-In the project directory, you can run:
+---
 
-### `npm start`
+## 🔍 What It Does
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- Accepts bulk IOC input — IPs, URLs, domains, and file hashes
+- Automatically detects IOC type
+- Enriches each IOC using multiple threat intelligence sources simultaneously
+- Maps findings to MITRE ATT&CK techniques, tactics, and mitigations
+- Calculates a risk score for each IOC
+- Exports a full incident report as CSV
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+---
 
-### `npm test`
+## 🧰 Threat Intelligence Sources
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+| Source | Coverage |
+|--------|----------|
+| [VirusTotal](https://virustotal.com) | Malware, URLs, domains, file hashes — 90+ AV engines |
+| [AbuseIPDB](https://abuseipdb.com) | IP reputation, abuse confidence score, ISP, country |
+| [URLScan.io](https://urlscan.io) | Live URL scanning and screenshot capture |
 
-### `npm run build`
+---
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## 🗺️ MITRE ATT&CK Mapping
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Each IOC is automatically mapped to relevant MITRE ATT&CK techniques including:
+- Technique ID and name (e.g. T1566.002 – Spearphishing Link)
+- Tactic category (e.g. Initial Access, Command and Control)
+- Full technique description
+- Recommended mitigations (M-codes)
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+---
 
-### `npm run eject`
+## 🚀 Tech Stack
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+- **Frontend:** React.js
+- **Backend:** Vercel Serverless Functions (Node.js)
+- **APIs:** VirusTotal v3, AbuseIPDB v2, URLScan.io
+- **Deployment:** Vercel
+- **Framework:** MITRE ATT&CK v14
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+---
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+## ⚙️ Run Locally
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+### Prerequisites
+- Node.js v18+
+- Free API keys from VirusTotal, AbuseIPDB, URLScan.io
 
-## Learn More
+### Setup
+```bash
+git clone https://github.com/krutik2907/ioc-tool.git
+cd ioc-tool
+npm install
+```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Create a `.env` file in the root folder:
+```
+REACT_APP_VIRUSTOTAL_KEY=your_virustotal_key
+REACT_APP_ABUSEIPDB_KEY=your_abuseipdb_key
+REACT_APP_URLSCAN_KEY=your_urlscan_key
+```
+```bash
+npm start
+```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+---
 
-### Code Splitting
+## 📁 Project Structure
+```
+ioc-tool/
+├── api/
+│   ├── virustotal.js      # Serverless proxy for VirusTotal API
+│   ├── abuseipdb.js       # Serverless proxy for AbuseIPDB API
+│   └── urlscan.js         # Serverless proxy for URLScan.io API
+├── src/
+│   └── App.jsx            # Main React application
+└── package.json
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+---
 
-### Analyzing the Bundle Size
+## 📊 Sample Output
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+| IOC | Type | Verdict | Risk Score | VT Hits |
+|-----|------|---------|------------|---------|
+| 185.220.101.45 | IP | 🔴 MALICIOUS | 100% | 17/94 |
+| 44d88612fea8a8f3... | Hash | 🔴 MALICIOUS | 88% | 67/76 |
+| 194.165.16.11 | IP | 🔴 MALICIOUS | 65% | 13/94 |
 
-### Making a Progressive Web App
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## 👤 Author
 
-### Advanced Configuration
+**Krutik** — SOC Analyst  
+[GitHub](https://github.com/krutik2907) · [LinkedIn](https://www.linkedin.com/in/krutikraut29/)
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+---
 
-### Deployment
+## ⚠️ Disclaimer
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+This tool is built for educational and portfolio purposes. All IOCs analyzed are for research only. Do not visit or interact with any malicious URLs directly.
+```
 
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+---
