@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
 
   const { ioc, type } = req.query;
-  const apiKey = process.env.REACT_APP_VIRUSTOTAL_KEY;
+  const apiKey = process.env.VIRUSTOTAL_KEY;
 
   if (!apiKey) return res.status(500).json({ error: "VirusTotal API key not configured" });
   if (!ioc || !type) return res.status(400).json({ error: "Missing ioc or type parameter" });

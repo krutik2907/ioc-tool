@@ -127,7 +127,8 @@ function mockEnrich(ioc, type) {
 }
 
 // ─── Live API enrichment via Vercel serverless proxy ─────────────────────────
-async function enrichIOC(ioc, type, keys) {
+// Keys are stored server-side only in Vercel env vars — never exposed to browser
+async function enrichIOC(ioc, type) {
   const result = {
     ioc, type,
     verdict: "Unknown",
@@ -138,34 +139,34 @@ async function enrichIOC(ioc, type, keys) {
   };
 
   // VirusTotal via /api/virustotal
-  if (keys.virustotal) {
-    try {
-      const res = await fetch(`/api/virustotal?ioc=${encodeURIComponent(ioc)}&type=${type}`);
-      const data = await res.json();
-      const stats = data?.data?.attributes?.last_analysis_stats;
-      if (stats) {
-        const malicious = stats.malicious || 0;
-        const total = Object.values(stats).reduce((a, b) => a + b, 0);
-        result.vtDetections = `${malicious}/${total}`;
-        result.riskScore = Math.round((malicious / total) * 100);
-        result.verdict = malicious > 5 ? "Malicious" : malicious > 0 ? "Suspicious" : "Clean";
-        result.country = data?.data?.attributes?.country || null;
-        result.lastSeen = data?.data?.attributes?.last_modification_date
-          ? new Date(data.data.attributes.last_modification_date * 1000).toISOString().split("T")[0]
-          : null;
-        const cats = data?.data?.attributes?.categories;
-        if (cats) result.tags = Object.values(cats).slice(0, 3);
-      }
-    } catch (e) {
-      result.errors.push("VirusTotal: " + e.message);
+  try {
+    const res = await fetch(`/api/virustotal?ioc=${encodeURIComponent(ioc)}&type=${type}`);
+    const data = await res.json();
+    if (data?.error) throw new Error(data.error);
+    const stats = data?.data?.attributes?.last_analysis_stats;
+    if (stats) {
+      const malicious = stats.malicious || 0;
+      const total = Object.values(stats).reduce((a, b) => a + b, 0);
+      result.vtDetections = `${malicious}/${total}`;
+      result.riskScore = Math.round((malicious / total) * 100);
+      result.verdict = malicious > 5 ? "Malicious" : malicious > 0 ? "Suspicious" : "Clean";
+      result.country = data?.data?.attributes?.country || null;
+      result.lastSeen = data?.data?.attributes?.last_modification_date
+        ? new Date(data.data.attributes.last_modification_date * 1000).toISOString().split("T")[0]
+        : null;
+      const cats = data?.data?.attributes?.categories;
+      if (cats) result.tags = Object.values(cats).slice(0, 3);
     }
+  } catch (e) {
+    result.errors.push("VirusTotal: " + e.message);
   }
 
   // AbuseIPDB via /api/abuseipdb (IP only)
-  if (keys.abuseipdb && type === "ip") {
+  if (type === "ip") {
     try {
       const res = await fetch(`/api/abuseipdb?ip=${encodeURIComponent(ioc)}`);
       const data = await res.json();
+      if (data?.error) throw new Error(data.error);
       if (data?.data) {
         result.abuseConfidence = data.data.abuseConfidenceScore;
         result.country = result.country || data.data.countryCode;
@@ -181,7 +182,7 @@ async function enrichIOC(ioc, type, keys) {
   }
 
   // URLScan via /api/urlscan (URL/domain)
-  if (keys.urlscan && (type === "url" || type === "domain")) {
+  if (type === "url" || type === "domain") {
     try {
       const res = await fetch(`/api/urlscan?url=${encodeURIComponent(ioc)}`);
       const data = await res.json();
@@ -257,19 +258,11 @@ function RiskMeter({ score }) {
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function IOCEnrichmentTool() {
   const [rawInput, setRawInput] = useState("");
-  const [keys, setKeys] = useState({
-    virustotal: process.env.REACT_APP_VIRUSTOTAL_KEY || "",
-    abuseipdb: process.env.REACT_APP_ABUSEIPDB_KEY || "",
-    urlscan: process.env.REACT_APP_URLSCAN_KEY || "",
-  });
-  const [showKeys, setShowKeys] = useState(false);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [expandedRow, setExpandedRow] = useState(null);
   const [activeTab, setActiveTab] = useState("input");
-
-  const hasKeys = keys.virustotal || keys.abuseipdb || keys.urlscan;
 
   const handleAnalyze = useCallback(async () => {
     const lines = rawInput.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -282,13 +275,13 @@ export default function IOCEnrichmentTool() {
     for (let i = 0; i < lines.length; i++) {
       const ioc = lines[i];
       const type = detectIOCType(ioc);
-      const result = hasKeys ? await enrichIOC(ioc, type, keys) : mockEnrich(ioc, type);
+      const result = await enrichIOC(ioc, type);
       enriched.push(result);
       setResults([...enriched]);
       setProgress(Math.round(((i + 1) / lines.length) * 100));
     }
     setLoading(false);
-  }, [rawInput, keys, hasKeys]);
+  }, [rawInput]);
 
   const sampleIOCs = `185.220.101.45\n194.165.16.11\nhttps://malware-download.xyz/payload.exe\nevil-phishing-site.ru\n44d88612fea8a8f36de82e1278abb02f`;
 
@@ -320,37 +313,14 @@ export default function IOCEnrichmentTool() {
               {tab === "input" ? "▶ INPUT" : `◈ RESULTS ${results.length ? `(${results.length})` : ""}`}
             </button>
           ))}
-          <button onClick={() => setShowKeys(!showKeys)}
-            style={{ marginLeft: "auto", padding: "8px 16px", background: showKeys ? "#0d2035" : "transparent", border: "1px solid #1e3a5a", color: hasKeys ? "#00ff88" : "#4a6a8a", borderRadius: 4, cursor: "pointer", fontSize: 11, letterSpacing: 2 }}>
-            {hasKeys ? "🔑 KEYS LOADED" : "⚙ API KEYS"}
-          </button>
-        </div>
-
-        {/* API Keys Panel */}
-        {showKeys && (
-          <div style={{ background: "#0a1520", border: "1px solid #1e3a5a", borderRadius: 6, padding: 16, marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: "#4a6a8a", letterSpacing: 2, marginBottom: 12 }}>API CONFIGURATION</div>
-            {[["virustotal", "VirusTotal API Key"], ["abuseipdb", "AbuseIPDB API Key"], ["urlscan", "URLScan.io API Key"]].map(([k, label]) => (
-              <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                <span style={{ width: 160, fontSize: 11, color: "#7eb8e8" }}>{label}</span>
-                <input type="password" placeholder="paste key here..." value={keys[k]}
-                  onChange={(e) => setKeys({ ...keys, [k]: e.target.value })}
-                  style={{ flex: 1, background: "#0d1e2e", border: "1px solid #1e3a5a", color: "#c8d8f0", padding: "6px 10px", borderRadius: 4, fontSize: 12, fontFamily: "monospace", outline: "none" }} />
-                {keys[k] && <span style={{ color: "#00ff88", fontSize: 12 }}>✓</span>}
-              </div>
-            ))}
-            <div style={{ fontSize: 10, color: "#2a4a6a", marginTop: 8 }}>Keys are loaded from Vercel environment variables automatically.</div>
+          <div style={{ marginLeft: "auto", padding: "8px 16px", border: "1px solid #1e3a5a", color: "#00ff88", borderRadius: 4, fontSize: 11, letterSpacing: 2 }}>
+            🔒 KEYS SECURED
           </div>
-        )}
+        </div>
 
         {/* Input Tab */}
         {activeTab === "input" && (
           <div>
-            {!hasKeys && (
-              <div style={{ background: "#1a1000", border: "1px solid #ff9a0033", borderRadius: 6, padding: 12, marginBottom: 16, fontSize: 11, color: "#ff9a00" }}>
-                ⚠ No API keys configured — running in DEMO MODE with mock data.
-              </div>
-            )}
             <div style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <span style={{ fontSize: 11, color: "#4a6a8a", letterSpacing: 2 }}>IOC INPUT — one per line (IP, URL, domain, hash)</span>
